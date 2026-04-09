@@ -34,39 +34,54 @@ cd agent-research-swarm
 
 pip install -r requirements.txt
 
-# Edit config.yaml — set your LM Studio URL and model assignments
-# Then run:
-python swarm.py
+# First-time setup — detects LM Studio / Ollama and walks you through model assignment:
+python -X utf8 swarm.py setup
+
+# Then run a query:
+python -X utf8 swarm.py query "how does X work"
 ```
 
-## Usage
+> **Windows users:** The `-X utf8` flag ensures correct Unicode rendering in the terminal.
+
+## Commands
 
 ```bash
-python swarm.py                        # prompt for a query, use config.yaml models
-python swarm.py "how does X work"      # pass query directly
-python swarm.py --models               # list models available in your server
-python swarm.py --pick                 # interactively assign models, then prompt for query
-python swarm.py --pick "your query"    # pick models, then run with this query
-python swarm.py --config my.yaml       # use a different config file
+python -X utf8 swarm.py setup                      # First-time setup wizard
+python -X utf8 swarm.py status                     # Check server connectivity + current model assignments
+python -X utf8 swarm.py query "your question"      # Run a research query
+python -X utf8 swarm.py query --pick               # Pick models interactively, then query
+python -X utf8 swarm.py query --preset research    # Use a preset template
+python -X utf8 swarm.py chat                       # Multi-turn conversation mode
+python -X utf8 swarm.py presets                    # List available preset templates
+python -X utf8 swarm.py config show                # Show current configuration
+python -X utf8 swarm.py config edit                # Edit configuration via wizard
 ```
 
 ## Configuration
 
-All settings live in `config.yaml`:
+On first run, `swarm setup` detects your running server(s) and guides you through assigning models to each agent. Config is saved to `config.yaml` (gitignored — your model assignments and API keys stay local).
+
+To start from a template, copy and edit the example:
+
+```bash
+cp config.yaml.example config.yaml
+```
+
+Key settings:
 
 ```yaml
 server:
-  url: http://localhost:1234/v1   # LM Studio. Use http://localhost:11434/v1 for Ollama
+  url: http://localhost:1234/v1   # LM Studio default. Use http://localhost:11434/v1 for Ollama
   api_key: sk-local              # dummy value is fine for local servers
 
 tavily_api_key: ""               # optional — leave blank for offline mode
 
 agents:
   coordinator:
-    model: phi-4-mini-instruct   # small + fast
+    model: phi-4-mini-instruct   # small + fast — only outputs a JSON list
     temperature: 0.3
   researcher:
-    model: qwen/qwen3.5-9b
+    model: google/gemma-3-12b
     temperature: 0.6
   analyst:
     model: qwen/qwen3.5-9b
@@ -75,11 +90,18 @@ agents:
     model: qwen/qwen3.5-9b
     temperature: 0.5
   code:
-    model: ibm/granite-4-h-tiny
+    model: ibm-granite/granite-8b-code-instruct-128k
     temperature: 0.1
 ```
 
-Run `python swarm.py --models` to see what's currently loaded in your server, then update `config.yaml` to match.
+## Preset templates
+
+```bash
+python -X utf8 swarm.py query --preset research "what are the latest AI trends?"
+python -X utf8 swarm.py query --preset code-review "explain async/await in Python"
+python -X utf8 swarm.py query --preset market "opportunities in edge AI"
+python -X utf8 swarm.py query --preset debug "why does React re-render so often?"
+```
 
 ## Web search (optional)
 
