@@ -119,6 +119,7 @@ def query(question, config_path, preset, pick, debug, models):
 
     # Auto-detect server if config URL unreachable and update config
     config = _auto_fix_server(config)
+    _preflight_load_if_needed(config)
 
     if not _check_models_assigned(config):
         if click.confirm("Run setup wizard now?"):
@@ -152,6 +153,7 @@ def chat(config_path, preset, debug):
     """Multi-turn conversation mode — maintains context across queries."""
     config = _load_or_setup(config_path)
     config = _auto_fix_server(config)
+    _preflight_load_if_needed(config)
 
     if not _check_models_assigned(config):
         if click.confirm("Run setup wizard now?"):
@@ -259,6 +261,54 @@ def _interactive_pick(config: dict) -> dict:
     config["agents"] = agents_config
     console.print()
     return config
+
+
+def _preflight_load_if_needed(config: dict) -> None:
+    """Silently check if assigned models are loaded; prompt to load any that aren't.
+
+    No-op if the LM Studio management API is unavailable (Ollama, remote servers, etc.).
+    """
+    try:
+        from cli.loader import is_management_api_available, get_loaded_models, load_model
+        from cli.profiles import get_profile
+    except ImportError:
+        return
+
+    server_url = config.get("server", {}).get("url", "")
+    if not is_management_api_available(server_url):
+        return  # Management API not available — skip silently
+
+    loaded = get_loaded_models(server_url) or []
+    loaded_lower = {m.lower() for m in loaded}
+
+    agents_cfg = config.get("agents", {})
+    assigned = {v.get("model", "").strip() for v in agents_cfg.values() if v.get("model", "").strip()}
+    missing = [m for m in assigned if m.lower() not in loaded_lower]
+
+    if not missing:
+        return  # All models already loaded
+
+    console.print("[bold]Model pre-flight check[/bold]")
+    console.print("[dim]The following assigned models are not currently loaded:[/dim]")
+    for m in missing:
+        from cli.profiles import get_profile as _gp
+        p = _gp(m)
+        console.print(
+            f"  [yellow]-[/yellow] [cyan]{m}[/cyan] "
+            f"(GPU {int(p.gpu_offload_ratio * 100)}%, ctx {p.context_length}, {p.quant_recommendation})"
+        )
+    console.print()
+
+    if click.confirm("  Load them now with optimal settings?", default=True):
+        for model_id in missing:
+            p = get_profile(model_id)
+            console.print(f"  Loading [cyan]{model_id}[/cyan]...")
+            ok = load_model(server_url, model_id, p)
+            if ok:
+                console.print(f"  [green]v[/green] {model_id} ready")
+            else:
+                console.print(f"  [yellow]! {model_id} load failed or timed out — continuing anyway[/yellow]")
+        console.print()
 
 
 def _auto_fix_server(config: dict) -> dict:

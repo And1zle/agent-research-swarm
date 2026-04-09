@@ -22,8 +22,12 @@ PRESETS = {
                 "temperature": 0.2,
                 "system": (
                     "You are a technical lead. Break this code review request into "
-                    "3-4 specific areas: architecture, patterns, bugs, improvements. "
-                    "Return ONLY a JSON array of strings."
+                    "3-4 specific areas: architecture, patterns, bugs, improvements.\n"
+                    "IMPORTANT: Return ONLY a valid JSON array of plain strings. "
+                    "Each element must be a string, NOT an object or dict.\n"
+                    'WRONG:   [{"task": "Check architecture"}]\n'
+                    'CORRECT: ["Check architecture", "Find bugs", "Suggest improvements"]\n'
+                    "Output nothing except the JSON array."
                 ),
             },
             "researcher": {
@@ -68,8 +72,12 @@ PRESETS = {
                 "system": (
                     "You are a debugging expert. Break this issue into: "
                     "1) Reproduce the issue, 2) Identify root cause, "
-                    "3) Find similar patterns, 4) Suggest fixes. "
-                    "Return ONLY a JSON array of strings."
+                    "3) Find similar patterns, 4) Suggest fixes.\n"
+                    "IMPORTANT: Return ONLY a valid JSON array of plain strings. "
+                    "Each element must be a string, NOT an object or dict.\n"
+                    'WRONG:   [{"task": "Reproduce issue"}]\n'
+                    'CORRECT: ["Reproduce the issue", "Identify root cause", "Find similar patterns", "Suggest fixes"]\n'
+                    "Output nothing except the JSON array."
                 ),
             },
             "analyst": {

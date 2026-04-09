@@ -2,4 +2,5 @@ openai>=1.30.0
 rich>=13.7.0
 pyyaml>=6.0.1
 click>=8.1.0
+httpx>=0.27.0
 tavily-python>=0.3.0   # optional — only needed if you set tavily_api_key in config.yaml

@@ -7,6 +7,7 @@ from rich.table import Table
 from cli.detector import detect_servers, best_server
 from cli.core import default_config, save_config
 from cli.visual import console, print_model_table, print_server_table
+from cli.profiles import get_profile, is_known_model
 
 
 def run_wizard(config_path: str = "config.yaml") -> dict:
@@ -16,7 +17,7 @@ def run_wizard(config_path: str = "config.yaml") -> dict:
     """
     console.print()
     console.print(Panel(
-        "[bold cyan]🦞 Agent Research Swarm — Setup Wizard[/bold cyan]\n"
+        "[bold cyan]Agent Research Swarm — Setup Wizard[/bold cyan]\n"
         "[dim]Let's configure your models. This only takes a minute.[/dim]",
         box=box.DOUBLE_EDGE,
         border_style="cyan"
@@ -40,7 +41,7 @@ def run_wizard(config_path: str = "config.yaml") -> dict:
 
         if len(servers) == 1:
             chosen_server = servers[0]
-            console.print(f"[green]✓[/green] Using [cyan]{chosen_server.name}[/cyan] ({chosen_server.url})")
+            console.print(f"[green]v[/green] Using [cyan]{chosen_server.name}[/cyan] ({chosen_server.url})")
         else:
             for i, s in enumerate(servers, 1):
                 console.print(f"  [{i}] {s.name} — {s.url}")
@@ -49,7 +50,7 @@ def run_wizard(config_path: str = "config.yaml") -> dict:
                 chosen_server = servers[int(choice) - 1]
             else:
                 chosen_server = servers[0]
-            console.print(f"[green]✓[/green] Selected [cyan]{chosen_server.name}[/cyan]")
+            console.print(f"[green]v[/green] Selected [cyan]{chosen_server.name}[/cyan]")
 
         server_url = chosen_server.url
         models     = chosen_server.models
@@ -66,11 +67,11 @@ def run_wizard(config_path: str = "config.yaml") -> dict:
 
     agent_keys = ["coordinator", "researcher", "analyst", "summarizer", "code"]
     agent_info = {
-        "coordinator": ("🎯 Coordinator",  "fast/small model recommended"),
-        "researcher":  ("🔍 Researcher",   "mid-size works well"),
-        "analyst":     ("📊 Analyst",      "mid-size, lower temp"),
-        "summarizer":  ("📝 Summarizer",   "any quality model"),
-        "code":        ("💻 Code Agent",   "code-specialized if available"),
+        "coordinator": ("Coordinator",  "fast/small model recommended"),
+        "researcher":  ("Researcher",   "mid-size works well"),
+        "analyst":     ("Analyst",      "mid-size, lower temp"),
+        "summarizer":  ("Summarizer",   "any quality model"),
+        "code":        ("Code Agent",   "code-specialized if available"),
     }
 
     default_model = models[0] if models else ""
@@ -96,15 +97,86 @@ def run_wizard(config_path: str = "config.yaml") -> dict:
             chosen = user_input
 
         assignments[key] = chosen
-        console.print(f"  [green]✓[/green] {label} → [cyan]{chosen}[/cyan]\n")
+        console.print(f"  [green]v[/green] {label} -> [cyan]{chosen}[/cyan]\n")
 
-    # ── Step 3: Tavily web search ─────────────────────────────────────────
+    # ── Step 3: Show model profiles ───────────────────────────────────────
+    console.print()
+    console.print("[bold]Model profiles[/bold] [dim](optimal load settings)[/dim]")
+    profile_table = Table(box=box.SIMPLE_HEAD, border_style="dim")
+    profile_table.add_column("Agent",    style="cyan")
+    profile_table.add_column("Model",    style="dim")
+    profile_table.add_column("GPU %",    justify="right")
+    profile_table.add_column("Context",  justify="right", style="dim")
+    profile_table.add_column("Quant",    style="dim")
+    profile_table.add_column("KV Cache", style="dim")
+
+    seen_models: dict[str, object] = {}  # model_id → profile (for dedup)
+    for key in agent_keys:
+        model_id = assignments.get(key, "")
+        if not model_id:
+            continue
+        profile = get_profile(model_id)
+        known   = is_known_model(model_id)
+        quant   = profile.quant_recommendation
+        if not known:
+            quant = f"[dim]{quant}[/dim] [yellow](default)[/yellow]"
+        profile_table.add_row(
+            key,
+            model_id,
+            f"{int(profile.gpu_offload_ratio * 100)}%",
+            str(profile.context_length),
+            quant,
+            profile.kv_cache_quant_type,
+        )
+        seen_models[model_id] = profile
+
+    console.print(profile_table)
+    console.print("[dim]  max_concurrent_predictions = 1 (all profiles)[/dim]\n")
+
+    # ── Step 4: Offer auto-load via management API ────────────────────────
+    try:
+        from cli.loader import is_management_api_available, load_model, get_loaded_models
+        mgmt_available = is_management_api_available(server_url)
+    except ImportError:
+        mgmt_available = False
+
+    if mgmt_available:
+        console.print("[bold]Auto-load with optimal settings?[/bold]")
+        console.print(
+            "[dim]The LM Studio management API is available. "
+            "I can load your models now with the GPU offload, context, and KV cache settings shown above.[/dim]"
+        )
+        do_load = console.input("  Auto-load models now? [dim](Y/n):[/dim] ").strip().lower()
+        if do_load in ("", "y", "yes"):
+            loaded = get_loaded_models(server_url) or []
+            loaded_lower = {m.lower() for m in loaded}
+            unique_models = list(dict.fromkeys(assignments.values()))  # preserve order, dedup
+            for model_id in unique_models:
+                if not model_id:
+                    continue
+                if model_id.lower() in loaded_lower:
+                    console.print(f"  [dim]{model_id} already loaded — skipping[/dim]")
+                    continue
+                profile = get_profile(model_id)
+                console.print(
+                    f"  Loading [cyan]{model_id}[/cyan] "
+                    f"(GPU {int(profile.gpu_offload_ratio * 100)}%, "
+                    f"ctx {profile.context_length}, {profile.quant_recommendation})..."
+                )
+                ok = load_model(server_url, model_id, profile)
+                if ok:
+                    console.print(f"  [green]v[/green] {model_id} loaded")
+                else:
+                    console.print(f"  [yellow]! {model_id} load failed or timed out[/yellow]")
+        console.print()
+
+    # ── Step 5: Tavily web search ─────────────────────────────────────────
     console.print("[bold]Web Search (optional)[/bold]")
     console.print("[dim]Tavily enables live web search during research. Leave blank to skip.[/dim]")
     tavily_key = console.input("  Tavily API key [dim](https://app.tavily.com):[/dim] ").strip()
     console.print()
 
-    # ── Step 4: Build and save config ────────────────────────────────────
+    # ── Step 6: Build and save config ────────────────────────────────────
     config = default_config(server_url)
     for key, model in assignments.items():
         config["agents"][key]["model"] = model
@@ -116,7 +188,7 @@ def run_wizard(config_path: str = "config.yaml") -> dict:
     table.add_column("Key",   style="dim")
     table.add_column("Value", style="cyan")
     table.add_row("Server URL", server_url)
-    table.add_row("Web search", "Tavily ✓" if tavily_key else "disabled")
+    table.add_row("Web search", "Tavily" if tavily_key else "disabled")
     for key, model in assignments.items():
         table.add_row(f"  agents.{key}", model)
     console.print(table)
@@ -125,7 +197,7 @@ def run_wizard(config_path: str = "config.yaml") -> dict:
     confirm = console.input("[bold]Save config to config.yaml?[/bold] [dim](Y/n):[/dim] ").strip().lower()
     if confirm in ("", "y", "yes"):
         save_config(config, config_path)
-        console.print(f"\n[green]✓ Config saved to {config_path}[/green]\n")
+        console.print(f"\n[green]v Config saved to {config_path}[/green]\n")
     else:
         console.print("[yellow]Config not saved.[/yellow]\n")
 

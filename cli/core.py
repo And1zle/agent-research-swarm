@@ -66,9 +66,12 @@ AGENT_META = {
         "role": "Coordinator",
         "system": (
             "You are a research coordinator. Given a research query, break it into "
-            "3-4 focused sub-tasks for specialized agents. Be concise. "
-            "Return ONLY a JSON array of strings, each string being a sub-task. "
-            'Example: ["Find recent statistics on X", "Analyze trends in Y", "Summarize key findings about Z"]'
+            "3-4 focused sub-tasks for specialized agents.\n"
+            "IMPORTANT: Return ONLY a valid JSON array of plain strings. "
+            "Each element must be a string, NOT an object or dict.\n"
+            'WRONG:   [{"task": "Find statistics"}, {"task": "Analyze trends"}]\n'
+            'CORRECT: ["Find statistics", "Analyze trends", "Summarize findings"]\n'
+            "Output nothing except the JSON array."
         ),
     },
     "researcher": {
@@ -133,11 +136,25 @@ def strip_think_tags(text: str) -> str:
 
 
 def parse_subtasks(coordinator_output: str) -> list:
+    def _normalize(item) -> str | None:
+        """Accept a plain string, or extract the first long string value from a dict."""
+        if isinstance(item, str) and len(item) > 5:
+            return item
+        if isinstance(item, dict):
+            for v in item.values():
+                if isinstance(v, str) and len(v) > 5:
+                    return v
+        return None
+
     try:
         start = coordinator_output.find("[")
         end   = coordinator_output.rfind("]") + 1
         if start != -1 and end > start:
-            return json.loads(coordinator_output[start:end])
+            parsed = json.loads(coordinator_output[start:end])
+            if isinstance(parsed, list):
+                result = [s for s in (_normalize(x) for x in parsed) if s]
+                if result:
+                    return result[:4]
     except Exception:
         pass
     lines = [l.strip().lstrip("0123456789.-) ") for l in coordinator_output.split("\n") if l.strip()]
