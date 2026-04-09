@@ -168,6 +168,10 @@ async def search_web(tavily, query: str, max_results: int = 8) -> str:
 
 # ── Agent runner ──────────────────────────────────────────────────────────────
 
+# Params supported by OpenAI-compatible APIs (LM Studio, Ollama)
+_SUPPORTED_PARAMS = {"top_p", "presence_penalty", "frequency_penalty", "stop", "seed"}
+
+
 async def call_agent(
     client: AsyncOpenAI,
     agent: dict,
@@ -175,7 +179,10 @@ async def call_agent(
     inference_params: dict,
     debug: bool = False,
 ) -> str:
-    params = {k: v for k, v in inference_params.items() if k != "seed" or v is not None}
+    params = {
+        k: v for k, v in inference_params.items()
+        if k in _SUPPORTED_PARAMS and v is not None
+    }
     try:
         response = await client.chat.completions.create(
             model=agent["model"],

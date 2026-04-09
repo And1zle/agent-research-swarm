@@ -6,7 +6,7 @@ from rich.panel import Panel
 from rich.progress import Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
 from rich.table import Table
 
-console = Console()
+console = Console(legacy_windows=False)
 
 
 # ── Header / Panels ───────────────────────────────────────────────────────────

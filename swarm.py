@@ -22,19 +22,14 @@ from cli.commands import setup, status, query, chat, presets, config
 
 @click.group(invoke_without_command=True)
 @click.pass_context
-@click.argument("question", required=False)
-def cli(ctx, question):
+def cli(ctx):
     """
-    🦞 Agent Research Swarm — multi-agent research using local LLMs.
+    Agent Research Swarm -- multi-agent research using local LLMs.
 
     Run 'swarm setup' on first use to configure your models.
     """
     if ctx.invoked_subcommand is None:
-        if question:
-            # Backward compat: swarm "question" → swarm query "question"
-            ctx.invoke(query, question=question)
-        else:
-            click.echo(ctx.get_help())
+        click.echo(ctx.get_help())
 
 
 cli.add_command(setup)
