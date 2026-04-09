@@ -1,0 +1,60 @@
+# ── Agent Research Swarm — Configuration ────────────────────────────────────
+#
+# Set your LM Studio (or any OpenAI-compatible server) URL and model assignments.
+# Run `python swarm.py --models` to list what's currently loaded in your server.
+# Run `python swarm.py --pick` to interactively assign models before running.
+
+# ── Server ───────────────────────────────────────────────────────────────────
+server:
+  url: http://localhost:1234/v1   # LM Studio default. Use http://localhost:11434/v1 for Ollama
+  api_key: sk-local               # Dummy value is fine for LM Studio / Ollama
+
+# ── Web Search (optional) ─────────────────────────────────────────────────────
+# Get a free Tavily API key at https://app.tavily.com
+# Leave blank to run in offline mode (pure LLM research, no live web search)
+tavily_api_key: ""
+
+# ── Agent Model Assignments ───────────────────────────────────────────────────
+# Each agent can use a different model. Assign smaller/faster models to
+# structured tasks (coordinator) and larger models to reasoning tasks (analyst).
+#
+# Tips:
+#   coordinator  → small + fast, only needs to output a JSON array
+#   researcher   → mid-size, needs to synthesize and write clearly
+#   analyst      → mid-size, benefits from stronger reasoning
+#   summarizer   → mid-size, needs good writing quality
+#   code         → code-specialized model if available, else any mid-size
+
+agents:
+  coordinator:
+    model: phi-4-mini-instruct    # small + fast — only outputs a JSON list
+    temperature: 0.3              # low = more structured output
+    max_tokens: 512
+
+  researcher:
+    model: qwen/qwen3.5-9b        # good at synthesis and clear writing
+    temperature: 0.6
+    max_tokens: 800
+
+  analyst:
+    model: qwen/qwen3.5-9b        # strong reasoning
+    temperature: 0.2              # low = precise, analytical
+    max_tokens: 800
+
+  summarizer:
+    model: qwen/qwen3.5-9b        # clear prose writer
+    temperature: 0.5
+    max_tokens: 1200
+
+  code:
+    model: ibm/granite-4-h-tiny   # swap for a code-specialized model if you have one
+    temperature: 0.1              # very low = deterministic code output
+    max_tokens: 800
+
+# ── Inference Parameters ─────────────────────────────────────────────────────
+# Applied to every request. Adjust based on your hardware.
+inference:
+  top_p: 0.95
+  top_k: 40
+  repetition_penalty: 1.1
+  seed: 42                        # set to null for random seed each run

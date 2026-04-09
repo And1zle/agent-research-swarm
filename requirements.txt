@@ -1,0 +1,4 @@
+openai>=1.30.0
+rich>=13.7.0
+pyyaml>=6.0.1
+tavily-python>=0.3.0   # optional — only needed if you set tavily_api_key in config.yaml
