@@ -1,0 +1,281 @@
+"""Click command handlers for Agent Research Swarm."""
+
+import asyncio
+import sys
+
+import click
+from rich import box
+from rich.panel import Panel
+from rich.table import Table
+
+from cli.core import load_config, save_config, default_config, build_agents
+from cli.detector import detect_servers, best_server
+from cli.presets import PRESETS, apply_preset, list_presets
+from cli.visual import console, print_server_table, print_model_table, print_agent_summary
+from cli.wizard import run_wizard
+from cli.chat import run_chat
+
+
+# ── Shared helpers ────────────────────────────────────────────────────────────
+
+def _load_or_setup(config_path: str) -> dict:
+    """Load config, or trigger setup wizard if missing."""
+    config = load_config(config_path)
+    if config is None:
+        console.print(f"[yellow]No config found at {config_path}.[/yellow]")
+        console.print("[dim]Starting setup wizard...[/dim]\n")
+        config = run_wizard(config_path)
+    return config
+
+
+def _check_models_assigned(config: dict) -> bool:
+    """Warn if any agent has an empty model assignment."""
+    agents = config.get("agents", {})
+    empty = [k for k, v in agents.items() if not v.get("model", "").strip()]
+    if empty:
+        console.print(f"[yellow]⚠ No model assigned for: {', '.join(empty)}[/yellow]")
+        console.print("[dim]Run 'swarm setup' to assign models, or use 'swarm query --pick'.[/dim]\n")
+        return False
+    return True
+
+
+# ── setup ─────────────────────────────────────────────────────────────────────
+
+@click.command()
+@click.option("--config", "config_path", default="config.yaml", help="Config file path")
+def setup(config_path):
+    """Interactive first-time setup — detect servers and assign models."""
+    run_wizard(config_path)
+
+
+# ── status ────────────────────────────────────────────────────────────────────
+
+@click.command()
+@click.option("--config", "config_path", default="config.yaml", help="Config file path")
+def status(config_path):
+    """Check server connectivity and show loaded models."""
+    console.print()
+    console.print("[cyan]Scanning for LLM servers...[/cyan]")
+    servers = detect_servers(force=True)
+
+    if not servers:
+        console.print("[red]✗ No servers found.[/red]")
+        console.print("[dim]Is LM Studio or Ollama running?[/dim]\n")
+        sys.exit(1)
+
+    print_server_table(servers)
+    console.print()
+
+    # Show current config model assignments if config exists
+    config = load_config(config_path)
+    if config:
+        agents = build_agents(config)
+        table = Table(title="Current Model Assignments", box=box.SIMPLE_HEAD, border_style="dim")
+        table.add_column("Agent",  style="cyan")
+        table.add_column("Model",  style="dim")
+        table.add_column("Temp",   justify="right", style="dim")
+        for key, agent in agents.items():
+            model = agent["model"] or "[red]not set[/red]"
+            table.add_row(
+                f"{agent['emoji']} {agent['role']}",
+                model,
+                str(agent["temperature"])
+            )
+        console.print(table)
+    else:
+        console.print(f"[yellow]No config at {config_path}. Run 'swarm setup' to configure.[/yellow]")
+
+    console.print()
+
+
+# ── query ─────────────────────────────────────────────────────────────────────
+
+@click.command()
+@click.argument("question", required=False)
+@click.option("--config",  "config_path", default="config.yaml", help="Config file path")
+@click.option("--preset",  default=None,  help="Preset template: research, code-review, market, debug")
+@click.option("--pick",    is_flag=True,  help="Interactively pick models before running")
+@click.option("--debug",   is_flag=True,  help="Show raw agent outputs including <think> tags")
+@click.option("--models",  is_flag=True,  help="List available models and exit")
+def query(question, config_path, preset, pick, debug, models):
+    """Run a single research query through the agent swarm."""
+    from cli.core import run_swarm
+
+    config = _load_or_setup(config_path)
+
+    # --models: list and exit
+    if models:
+        servers = detect_servers()
+        if not servers:
+            console.print("[yellow]No servers found.[/yellow]")
+            return
+        for srv in servers:
+            print_model_table(srv.models, title=f"{srv.name} Models")
+        return
+
+    # --pick: interactive model reassignment
+    if pick:
+        config = _interactive_pick(config)
+
+    # Auto-detect server if config URL unreachable and update config
+    config = _auto_fix_server(config)
+
+    if not _check_models_assigned(config):
+        if click.confirm("Run setup wizard now?"):
+            config = run_wizard(config_path)
+
+    # Apply preset if specified
+    if preset:
+        if preset not in PRESETS:
+            console.print(f"[red]Unknown preset '{preset}'. Available: {', '.join(PRESETS)}[/red]")
+            return
+        config = apply_preset(config, preset)
+        console.print(f"[green]✓[/green] Preset applied: [magenta]{preset}[/magenta]\n")
+
+    # Get query
+    if not question:
+        question = console.input("[bold yellow]Research query:[/bold yellow] ").strip()
+    if not question:
+        console.print("[red]No query provided.[/red]")
+        return
+
+    asyncio.run(run_swarm(question, config, debug=debug))
+
+
+# ── chat ──────────────────────────────────────────────────────────────────────
+
+@click.command()
+@click.option("--config", "config_path", default="config.yaml", help="Config file path")
+@click.option("--preset", default=None,  help="Preset template: research, code-review, market, debug")
+@click.option("--debug",  is_flag=True,  help="Show raw agent outputs including <think> tags")
+def chat(config_path, preset, debug):
+    """Multi-turn conversation mode — maintains context across queries."""
+    config = _load_or_setup(config_path)
+    config = _auto_fix_server(config)
+
+    if not _check_models_assigned(config):
+        if click.confirm("Run setup wizard now?"):
+            config = run_wizard(config_path)
+            return
+
+    if preset:
+        if preset not in PRESETS:
+            console.print(f"[red]Unknown preset '{preset}'.[/red]")
+            return
+        config = apply_preset(config, preset)
+        console.print(f"[green]✓[/green] Preset: [magenta]{preset}[/magenta]\n")
+
+    run_chat(config, debug=debug, preset=preset)
+
+
+# ── presets ───────────────────────────────────────────────────────────────────
+
+@click.command()
+def presets():
+    """Show available preset templates."""
+    console.print()
+    table = Table(title="Available Presets", box=box.SIMPLE_HEAD, border_style="dim")
+    table.add_column("Name",        style="magenta")
+    table.add_column("Label",       style="cyan")
+    table.add_column("Description", style="dim")
+
+    for name, p in PRESETS.items():
+        table.add_row(name, f"{p['emoji']} {p['name']}", p["description"])
+
+    console.print(table)
+    console.print()
+    console.print("[dim]Usage: swarm query --preset research \"your question\"[/dim]")
+    console.print("[dim]       swarm chat --preset code-review[/dim]\n")
+
+
+# ── config ────────────────────────────────────────────────────────────────────
+
+@click.group()
+def config():
+    """Manage configuration."""
+    pass
+
+
+@config.command("show")
+@click.option("--config", "config_path", default="config.yaml", help="Config file path")
+def config_show(config_path):
+    """Show current configuration."""
+    cfg = load_config(config_path)
+    if cfg is None:
+        console.print(f"[yellow]No config found at {config_path}.[/yellow]")
+        return
+    import yaml
+    console.print()
+    console.print(Panel(
+        yaml.dump(cfg, default_flow_style=False, allow_unicode=True),
+        title=f"[dim]{config_path}[/dim]",
+        border_style="dim",
+        box=box.MINIMAL
+    ))
+
+
+@config.command("edit")
+@click.option("--config", "config_path", default="config.yaml", help="Config file path")
+def config_edit(config_path):
+    """Re-run the setup wizard to update configuration."""
+    run_wizard(config_path)
+
+
+# ── Internal utilities ────────────────────────────────────────────────────────
+
+def _interactive_pick(config: dict) -> dict:
+    """Let user reassign models interactively (keeps current as default)."""
+    servers = detect_servers()
+    models  = []
+    if servers:
+        srv    = best_server(servers)
+        models = srv.models if srv else []
+
+    if models:
+        print_model_table(models)
+        console.print()
+
+    agents_config = config.get("agents", {})
+    for key in ["coordinator", "researcher", "analyst", "summarizer", "code"]:
+        current = agents_config.get(key, {}).get("model", "not set")
+        if models:
+            prompt = (
+                f"[bold]{key}[/bold] [dim](current: {current})[/dim] "
+                f"[dim]#{1}-{len(models)} or name or Enter to keep:[/dim] "
+            )
+        else:
+            prompt = f"[bold]{key}[/bold] [dim](current: {current})[/dim] [dim]name or Enter:[/dim] "
+
+        user_input = console.input(prompt).strip()
+        if not user_input:
+            continue
+        if models and user_input.isdigit():
+            idx = int(user_input) - 1
+            user_input = models[idx] if 0 <= idx < len(models) else current
+
+        agents_config.setdefault(key, {})["model"] = user_input
+        console.print(f"  [green]✓[/green] {key} → {user_input}")
+
+    config["agents"] = agents_config
+    console.print()
+    return config
+
+
+def _auto_fix_server(config: dict) -> dict:
+    """If configured server URL looks like a Tailscale/remote IP, suggest localhost."""
+    url = config.get("server", {}).get("url", "")
+    if "localhost" in url or "127.0.0.1" in url:
+        return config  # looks fine
+
+    servers = detect_servers()
+    if servers:
+        srv = best_server(servers)
+        if srv and srv.url != url:
+            console.print(
+                f"[yellow]⚠ Configured server ({url}) may be unreachable.[/yellow]\n"
+                f"[dim]Detected: {srv.name} at {srv.url}[/dim]"
+            )
+            if click.confirm(f"  Switch to {srv.url}?", default=True):
+                config["server"]["url"] = srv.url
+                console.print(f"[green]✓[/green] Using {srv.url}\n")
+    return config
