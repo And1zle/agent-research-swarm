@@ -45,10 +45,10 @@ def default_config(server_url: str = "http://localhost:1234/v1") -> dict:
         "tavily_api_key": "",
         "agents": {
             "coordinator": {"model": "", "temperature": 0.3, "max_tokens": 512},
-            "researcher":  {"model": "", "temperature": 0.6, "max_tokens": 800},
-            "analyst":     {"model": "", "temperature": 0.2, "max_tokens": 800},
-            "summarizer":  {"model": "", "temperature": 0.5, "max_tokens": 1200},
-            "code":        {"model": "", "temperature": 0.1, "max_tokens": 800},
+            "researcher":  {"model": "", "temperature": 0.6, "max_tokens": -1},
+            "analyst":     {"model": "", "temperature": 0.2, "max_tokens": -1},
+            "summarizer":  {"model": "", "temperature": 0.5, "max_tokens": -1},
+            "code":        {"model": "", "temperature": 0.1, "max_tokens": -1},
         },
         "inference": {
             "top_p": 0.95,
@@ -201,16 +201,19 @@ async def call_agent(
         if k in _SUPPORTED_PARAMS and v is not None
     }
     try:
-        response = await client.chat.completions.create(
+        max_tok = agent["max_tokens"]
+        create_kwargs = dict(
             model=agent["model"],
             messages=[
                 {"role": "system", "content": agent["system"]},
                 {"role": "user",   "content": prompt},
             ],
-            max_tokens=agent["max_tokens"],
             temperature=agent["temperature"],
             **params,
         )
+        if max_tok and max_tok > 0:
+            create_kwargs["max_tokens"] = max_tok
+        response = await client.chat.completions.create(**create_kwargs)
         raw = response.choices[0].message.content.strip()
         if debug:
             print_debug_block(f"{agent['role']} raw output", raw)
