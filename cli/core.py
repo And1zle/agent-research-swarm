@@ -135,7 +135,7 @@ def strip_think_tags(text: str) -> str:
     return re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
 
 
-def parse_subtasks(coordinator_output: str) -> list:
+def parse_subtasks(coordinator_output: str, max_tasks: int = 4) -> list:
     def _normalize(item) -> str | None:
         """Accept a plain string, or extract the first long string value from a dict."""
         if isinstance(item, str) and len(item) > 5:
@@ -154,11 +154,11 @@ def parse_subtasks(coordinator_output: str) -> list:
             if isinstance(parsed, list):
                 result = [s for s in (_normalize(x) for x in parsed) if s]
                 if result:
-                    return result[:4]
+                    return result[:max_tasks]
     except Exception:
         pass
     lines = [l.strip().lstrip("0123456789.-) ") for l in coordinator_output.split("\n") if l.strip()]
-    return [l for l in lines if len(l) > 10][:4]
+    return [l for l in lines if len(l) > 10][:max_tasks]
 
 
 # ── Web search ────────────────────────────────────────────────────────────────
@@ -224,15 +224,17 @@ async def call_agent(
 
 # ── Main swarm pipeline ───────────────────────────────────────────────────────
 
-async def run_swarm(query: str, config: dict, debug: bool = False, context: str = ""):
+async def run_swarm(query: str, config: dict, debug: bool = False, context: str = "", deep_brief: bool = False):
     """
     Run the full multi-agent research pipeline.
 
     Args:
-        query:   The research question.
-        config:  Loaded (and optionally preset-patched) config dict.
-        debug:   If True, show raw agent outputs including <think> tags.
-        context: Optional prior conversation context (for chat mode).
+        query:      The research question (mode A) or full structured brief (mode B).
+        config:     Loaded (and optionally preset-patched) config dict.
+        debug:      If True, show raw agent outputs including <think> tags.
+        context:    Optional prior conversation context (for chat mode).
+        deep_brief: If True (mode B), inject the full brief as system context into
+                    all agents and allow up to 6 subtasks.
 
     Returns:
         final_report (str)
@@ -252,12 +254,34 @@ async def run_swarm(query: str, config: dict, debug: bool = False, context: str 
 
     print_header(query, server_url, web_search_enabled)
 
+    # ── Mode B: inject brief as system context into all agents ────────────
+    brief_context = ""
+    if deep_brief:
+        brief_context = query  # the full brief becomes shared context
+        # Override each agent's system prompt to include the brief
+        for key in agents:
+            agents[key]["system"] = (
+                f"=== RESEARCH BRIEF ===\n{brief_context}\n=== END BRIEF ===\n\n"
+                + agents[key]["system"]
+            )
+
     # ── Step 1: Coordinator ───────────────────────────────────────────────
     print_step(1, 4, agents["coordinator"]["emoji"], "Coordinator", agents["coordinator"]["model"],
                "breaking down query...")
     t0 = time.time()
     with console.status("[cyan]Coordinator thinking...[/cyan]"):
-        coord_prompt = f"Research query: {query}\nBreak this into 3-4 focused sub-tasks."
+        if deep_brief:
+            coord_prompt = (
+                "You have been given a structured research brief above.\n"
+                "Extract 4-6 specific, actionable research tasks from the brief.\n"
+                "Each task should address a distinct research thread (e.g. one family line, "
+                "one historical period, one methodology).\n"
+                "IMPORTANT: Return ONLY a valid JSON array of plain strings.\n"
+                'CORRECT: ["Research the Sanchez line from 1600s", "Trace Griego origins via Onate expedition"]\n'
+                "Output nothing except the JSON array."
+            )
+        else:
+            coord_prompt = f"Research query: {query}\nBreak this into 3-4 focused sub-tasks."
         if context:
             coord_prompt = f"Prior context:\n{context}\n\n{coord_prompt}"
         coordinator_output = await call_agent(
@@ -265,7 +289,8 @@ async def run_swarm(query: str, config: dict, debug: bool = False, context: str 
         )
     timings["coordinator"] = time.time() - t0
 
-    subtasks = parse_subtasks(coordinator_output) or [query]
+    max_subtasks = 6 if deep_brief else 4
+    subtasks = parse_subtasks(coordinator_output, max_tasks=max_subtasks) or [query]
     print_success(f"{len(subtasks)} sub-tasks identified:")
     print_subtasks(subtasks)
 
@@ -338,13 +363,23 @@ async def run_swarm(query: str, config: dict, debug: bool = False, context: str 
     print_step(4, 4, agents["summarizer"]["emoji"], "Summarizer",
                agents["summarizer"]["model"], "writing final report...")
 
-    summary_prompt = (
-        f"Original research query: {query}\n\n"
-        f"## Research Findings\n{combined_research}\n\n"
-        f"## Analysis\n{analyst_result}\n\n"
-        f"## Technical Details\n{code_result}\n\n"
-        "Write a comprehensive, well-structured final report in markdown."
-    )
+    if deep_brief:
+        summary_prompt = (
+            f"## Research Findings\n{combined_research}\n\n"
+            f"## Analysis\n{analyst_result}\n\n"
+            f"## Additional Details\n{code_result}\n\n"
+            "Using the research brief in your system context, write a comprehensive final report "
+            "that strictly follows the output format and directives specified in the brief. "
+            "Address every research thread. Use structured markdown."
+        )
+    else:
+        summary_prompt = (
+            f"Original research query: {query}\n\n"
+            f"## Research Findings\n{combined_research}\n\n"
+            f"## Analysis\n{analyst_result}\n\n"
+            f"## Technical Details\n{code_result}\n\n"
+            "Write a comprehensive, well-structured final report in markdown."
+        )
 
     t0 = time.time()
     with console.status("[cyan]Summarizer writing report...[/cyan]"):

@@ -92,12 +92,16 @@ def status(config_path):
 
 @click.command()
 @click.argument("question", required=False)
-@click.option("--config",  "config_path", default="config.yaml", help="Config file path")
-@click.option("--preset",  default=None,  help="Preset template: research, code-review, market, debug")
-@click.option("--pick",    is_flag=True,  help="Interactively pick models before running")
-@click.option("--debug",   is_flag=True,  help="Show raw agent outputs including <think> tags")
-@click.option("--models",  is_flag=True,  help="List available models and exit")
-def query(question, config_path, preset, pick, debug, models):
+@click.option("--config",    "config_path", default="config.yaml", help="Config file path")
+@click.option("--preset",    default=None,  help="Preset template: research, code-review, market, debug")
+@click.option("--pick",      is_flag=True,  help="Interactively pick models before running")
+@click.option("--debug",     is_flag=True,  help="Show raw agent outputs including <think> tags")
+@click.option("--models",    is_flag=True,  help="List available models and exit")
+@click.option("--from-file", "from_file",   default=None, type=click.Path(exists=True),
+              help="Load the query/brief from a text file")
+@click.option("--mode",      default=None,  type=click.Choice(["a", "b"], case_sensitive=False),
+              help="Skip mode prompt: a=standard, b=deep brief")
+def query(question, config_path, preset, pick, debug, models, from_file, mode):
     """Run a single research query through the agent swarm."""
     from cli.core import run_swarm
 
@@ -117,7 +121,6 @@ def query(question, config_path, preset, pick, debug, models):
     if pick:
         config = _interactive_pick(config)
 
-    # Auto-detect server if config URL unreachable and update config
     config = _auto_fix_server(config)
     _preflight_load_if_needed(config)
 
@@ -125,7 +128,6 @@ def query(question, config_path, preset, pick, debug, models):
         if click.confirm("Run setup wizard now?"):
             config = run_wizard(config_path)
 
-    # Apply preset if specified
     if preset:
         if preset not in PRESETS:
             console.print(f"[red]Unknown preset '{preset}'. Available: {', '.join(PRESETS)}[/red]")
@@ -133,14 +135,46 @@ def query(question, config_path, preset, pick, debug, models):
         config = apply_preset(config, preset)
         console.print(f"[green]✓[/green] Preset applied: [magenta]{preset}[/magenta]\n")
 
-    # Get query
+    # --from-file: load brief — always runs mode B
+    if from_file:
+        with open(from_file, encoding="utf-8") as f:
+            question = f.read().strip()
+        console.print(f"[green]✓[/green] Brief loaded from [dim]{from_file}[/dim] ({len(question)} chars)\n")
+        mode = "b"
+
+    # Mode selection — ask if not already decided
+    if mode is None:
+        console.print("[bold]Select research mode:[/bold]")
+        console.print("  [cyan]A[/cyan]  Standard — query broken into subtasks, agents research each one")
+        console.print("  [cyan]B[/cyan]  Deep brief — paste a structured brief, agents follow its directives\n")
+        raw = console.input("  Mode [dim](A/B, default A):[/dim] ").strip().lower()
+        mode = raw if raw in ("a", "b") else "a"
+        console.print()
+
+    deep_brief = (mode == "b")
+
+    # Get the query/brief
     if not question:
-        question = console.input("[bold yellow]Research query:[/bold yellow] ").strip()
+        if deep_brief:
+            console.print("[dim]Paste your brief below. Enter a blank line followed by END to finish:[/dim]")
+            lines = []
+            while True:
+                line = input()
+                if line.strip().upper() == "END":
+                    break
+                lines.append(line)
+            question = "\n".join(lines).strip()
+        else:
+            question = console.input("[bold yellow]Research query:[/bold yellow] ").strip()
+
     if not question:
         console.print("[red]No query provided.[/red]")
         return
 
-    asyncio.run(run_swarm(question, config, debug=debug))
+    if deep_brief:
+        console.print("\n[magenta]Deep brief mode[/magenta] [dim]— brief injected into all agents, up to 6 subtasks[/dim]\n")
+
+    asyncio.run(run_swarm(question, config, debug=debug, deep_brief=deep_brief))
 
 
 # ── chat ──────────────────────────────────────────────────────────────────────
