@@ -60,12 +60,13 @@ def run_chat(config: dict, debug: bool = False, preset: str = None):
         context = "\n\n".join(context_blocks[-3:]) if context_blocks else ""  # last 3 rounds
 
         try:
-            report = asyncio.run(run_swarm(
+            result = asyncio.run(run_swarm(
                 query  = query,
                 config = config,
                 debug  = debug,
                 context= context,
             ))
+            report = result["report"]
             context_blocks.append(f"## Round {turn}: {query}\n{report}")
             session_log.append({"turn": turn, "query": query, "report": report})
         except KeyboardInterrupt:

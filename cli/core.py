@@ -224,7 +224,7 @@ async def call_agent(
 
 # ── Main swarm pipeline ───────────────────────────────────────────────────────
 
-async def run_swarm(query: str, config: dict, debug: bool = False, context: str = "", deep_brief: bool = False):
+async def run_swarm(query: str, config: dict, debug: bool = False, context: str = "", deep_brief: bool = False, max_subtasks: int = None):
     """
     Run the full multi-agent research pipeline.
 
@@ -289,7 +289,8 @@ async def run_swarm(query: str, config: dict, debug: bool = False, context: str 
         )
     timings["coordinator"] = time.time() - t0
 
-    max_subtasks = 6 if deep_brief else 4
+    if max_subtasks is None:
+        max_subtasks = 6 if deep_brief else 4
     subtasks = parse_subtasks(coordinator_output, max_tasks=max_subtasks) or [query]
     print_success(f"{len(subtasks)} sub-tasks identified:")
     print_subtasks(subtasks)
@@ -406,4 +407,4 @@ async def run_swarm(query: str, config: dict, debug: bool = False, context: str 
 
     console.print(f"[dim]Report saved → {output_file}[/dim]\n")
 
-    return final_report
+    return {"report": final_report, "code": code_result, "analysis": analyst_result}

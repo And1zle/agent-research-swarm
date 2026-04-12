@@ -18,6 +18,7 @@ Usage:
 import click
 
 from cli.commands import setup, status, query, chat, presets, config
+from cli.genealogy import genealogy_cmd
 
 
 @click.group(invoke_without_command=True)
@@ -38,6 +39,7 @@ cli.add_command(query)
 cli.add_command(chat)
 cli.add_command(presets)
 cli.add_command(config)
+cli.add_command(genealogy_cmd, name="genealogy")
 
 
 if __name__ == "__main__":
