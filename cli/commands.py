@@ -276,8 +276,9 @@ def config_edit(config_path):
 
 def _interactive_pick(config: dict) -> dict:
     """Let user reassign models interactively (keeps current as default)."""
-    servers = detect_servers()
-    models  = []
+    with console.status("[cyan]Scanning for models...[/cyan]"):
+        servers = detect_servers(force=True)
+    models = []
     if servers:
         srv    = best_server(servers)
         models = srv.models if srv else []
@@ -285,6 +286,8 @@ def _interactive_pick(config: dict) -> dict:
     if models:
         print_model_table(models)
         console.print()
+    else:
+        console.print("[yellow]No models detected — enter model names manually.[/yellow]\n")
 
     agents_config = config.get("agents", {})
     for key in ["coordinator", "researcher", "analyst", "summarizer", "code"]:
