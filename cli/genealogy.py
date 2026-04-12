@@ -282,9 +282,11 @@ def _prompt_for_brief() -> str:
               help="Resume project using existing tree.ged as context (skip brief prompt)")
 @click.option("--status",    is_flag=True,
               help="Show project status and frontier ancestors, then exit")
+@click.option("--parallel",  "n_parallel", default=None, type=int,
+              help="Number of researcher agents to run in parallel (1-6). Prompted if not set.")
 @click.option("--config",    "config_path", default="config.yaml")
 @click.option("--debug",     is_flag=True)
-def genealogy_cmd(project, mode, from_file, resume, status, config_path, debug):
+def genealogy_cmd(project, mode, from_file, resume, status, n_parallel, config_path, debug):
     """Deep family tree research — iterative passes, project history, GEDCOM output.
 
     \b
@@ -331,6 +333,25 @@ def genealogy_cmd(project, mode, from_file, resume, status, config_path, debug):
         border_style="cyan",
     ))
     console.print()
+
+    # ── Parallel agents prompt ────────────────────────────────────────────
+    if n_parallel is None:
+        console.print("[bold]Run multiple researcher agents in parallel?[/bold]")
+        console.print("  [dim]1[/dim]  Sequential [dim](safe, default — one at a time)[/dim]")
+        console.print("  [dim]2[/dim]  2 parallel  [dim](2x faster research step)[/dim]")
+        console.print("  [dim]3[/dim]  3 parallel  [dim](fastest — good if LM Studio handles queuing well)[/dim]\n")
+        raw = console.input("  Parallel researchers [dim](1/2/3, default 1):[/dim] ").strip()
+        n_parallel = int(raw) if raw.isdigit() and int(raw) in (1, 2, 3) else 1
+        console.print()
+
+    if n_parallel > 1:
+        console.print(
+            f"[green]v[/green] {n_parallel} parallel researchers — "
+            f"subtasks will run concurrently\n"
+            f"[dim]  Note: LM Studio queues requests with max_concurrent_predictions=1,\n"
+            f"  so requests run back-to-back rather than truly simultaneously.\n"
+            f"  Parallel mode still reduces coordination overhead.[/dim]\n"
+        )
 
     # ── Load brief ────────────────────────────────────────────────────────
     if from_file:
@@ -382,6 +403,7 @@ def genealogy_cmd(project, mode, from_file, resume, status, config_path, debug):
             debug=debug,
             deep_brief=True,
             max_subtasks=max_subtasks,
+            n_parallel=n_parallel,
         ))
 
         report_file  = session.save_pass_report(current_pass, result["report"])

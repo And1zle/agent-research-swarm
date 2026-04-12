@@ -101,7 +101,9 @@ def status(config_path):
               help="Load the query/brief from a text file")
 @click.option("--mode",      default=None,  type=click.Choice(["a", "b", "c"], case_sensitive=False),
               help="Skip mode prompt: a=standard, b=deep brief, c=genealogy")
-def query(question, config_path, preset, pick, debug, models, from_file, mode):
+@click.option("--parallel",  "n_parallel",  default=1, type=int,
+              help="Number of parallel researcher agents (default 1)")
+def query(question, config_path, preset, pick, debug, models, from_file, mode, n_parallel):
     """Run a single research query through the agent swarm."""
     from cli.core import run_swarm
 
@@ -165,8 +167,8 @@ def query(question, config_path, preset, pick, debug, models, from_file, mode):
         if deep_brief:
             if genealogy:
                 console.print("[bold]Paste your known family tree data below.[/bold]")
-                console.print("[dim]Include all known ancestors, dates, and historical context.")
-                console.print("You can also load from a file with --from-file.[/dim]")
+                console.print("[dim]Include all known ancestors, dates, and historical context.[/dim]")
+                console.print("[dim]You can also load from a file with --from-file.[/dim]")
             else:
                 console.print("[bold]Paste your research brief below.[/bold]")
             console.print("[dim]Enter a blank line followed by END when done:[/dim]\n")
@@ -189,7 +191,7 @@ def query(question, config_path, preset, pick, debug, models, from_file, mode):
     elif deep_brief:
         console.print("\n[magenta]Deep brief mode[/magenta] [dim]— brief injected into all agents, up to 6 subtasks[/dim]\n")
 
-    asyncio.run(run_swarm(question, config, debug=debug, deep_brief=deep_brief))
+    asyncio.run(run_swarm(question, config, debug=debug, deep_brief=deep_brief, n_parallel=n_parallel))
 
 
 # ── chat ──────────────────────────────────────────────────────────────────────

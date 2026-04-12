@@ -224,7 +224,7 @@ async def call_agent(
 
 # ── Main swarm pipeline ───────────────────────────────────────────────────────
 
-async def run_swarm(query: str, config: dict, debug: bool = False, context: str = "", deep_brief: bool = False, max_subtasks: int = None):
+async def run_swarm(query: str, config: dict, debug: bool = False, context: str = "", deep_brief: bool = False, max_subtasks: int = None, n_parallel: int = 1):
     """
     Run the full multi-agent research pipeline.
 
@@ -303,11 +303,17 @@ async def run_swarm(query: str, config: dict, debug: bool = False, context: str 
         print_step(2, 4, agents["researcher"]["emoji"], "Researcher",
                    agents["researcher"]["model"])
 
-    research_findings = []
-    t0 = time.time()
-    for i, task in enumerate(subtasks, 1):
-        if web_search_enabled:
-            with console.status(f"[cyan]Searching + synthesizing sub-task {i}/{len(subtasks)}...[/cyan]"):
+    t0  = time.time()
+    sem = asyncio.Semaphore(max(1, n_parallel))
+
+    if n_parallel > 1:
+        console.print(f"[dim]  Running {len(subtasks)} subtasks with {n_parallel} parallel researchers[/dim]")
+
+    async def _research_one(i: int, task: str) -> tuple[int, str]:
+        async with sem:
+            if n_parallel > 1:
+                console.print(f"[dim]  -> Researcher {i} starting: {task[:60]}...[/dim]")
+            if web_search_enabled:
                 t_ws = time.time()
                 search_result = await search_web(tavily, task)
                 timings["web_search"] = timings.get("web_search", 0) + (time.time() - t_ws)
@@ -316,15 +322,28 @@ async def run_swarm(query: str, config: dict, debug: bool = False, context: str 
                     f"Sub-task: {task}\n\nWeb results:\n{search_result}\n\nSynthesize findings.",
                     inference_params, debug
                 )
-        else:
-            with console.status(f"[cyan]Researching sub-task {i}/{len(subtasks)}...[/cyan]"):
+            else:
                 finding = await call_agent(
                     client, agents["researcher"],
                     f"Sub-task: {task}\n\nProvide thorough findings.",
                     inference_params, debug
                 )
-        research_findings.append(f"### Sub-task {i}: {task}\n{finding}")
-        print_success(f"Sub-task {i}/{len(subtasks)} complete ({len(finding)} chars)")
+            print_success(f"Sub-task {i}/{len(subtasks)} complete ({len(finding)} chars)")
+            return i, finding
+
+    if n_parallel > 1:
+        results = await asyncio.gather(*[_research_one(i, t) for i, t in enumerate(subtasks, 1)])
+    else:
+        results = []
+        for i, task in enumerate(subtasks, 1):
+            with console.status(f"[cyan]Researching sub-task {i}/{len(subtasks)}...[/cyan]"):
+                idx, finding = await _research_one(i, task)
+                results.append((idx, finding))
+
+    research_findings = [
+        f"### Sub-task {i}: {subtasks[i-1]}\n{finding}"
+        for i, finding in sorted(results)
+    ]
     timings["researcher"] = time.time() - t0
     console.print()
 
