@@ -99,8 +99,8 @@ def status(config_path):
 @click.option("--models",    is_flag=True,  help="List available models and exit")
 @click.option("--from-file", "from_file",   default=None, type=click.Path(exists=True),
               help="Load the query/brief from a text file")
-@click.option("--mode",      default=None,  type=click.Choice(["a", "b"], case_sensitive=False),
-              help="Skip mode prompt: a=standard, b=deep brief")
+@click.option("--mode",      default=None,  type=click.Choice(["a", "b", "c"], case_sensitive=False),
+              help="Skip mode prompt: a=standard, b=deep brief, c=genealogy")
 def query(question, config_path, preset, pick, debug, models, from_file, mode):
     """Run a single research query through the agent swarm."""
     from cli.core import run_swarm
@@ -145,18 +145,31 @@ def query(question, config_path, preset, pick, debug, models, from_file, mode):
     # Mode selection — ask if not already decided
     if mode is None:
         console.print("[bold]Select research mode:[/bold]")
-        console.print("  [cyan]A[/cyan]  Standard — query broken into subtasks, agents research each one")
-        console.print("  [cyan]B[/cyan]  Deep brief — paste a structured brief, agents follow its directives\n")
-        raw = console.input("  Mode [dim](A/B, default A):[/dim] ").strip().lower()
-        mode = raw if raw in ("a", "b") else "a"
+        console.print("  [cyan]A[/cyan]  Standard    — query broken into subtasks, agents research each one")
+        console.print("  [cyan]B[/cyan]  Deep brief  — structured brief injected into all agents, up to 6 subtasks")
+        console.print("  [cyan]C[/cyan]  Genealogy   — specialized agents for family tree research, outputs GEDCOM\n")
+        raw = console.input("  Mode [dim](A/B/C, default A):[/dim] ").strip().lower()
+        mode = raw if raw in ("a", "b", "c") else "a"
         console.print()
 
-    deep_brief = (mode == "b")
+    deep_brief  = (mode in ("b", "c"))
+    genealogy   = (mode == "c")
+
+    # Genealogy mode: auto-apply genealogy preset
+    if genealogy:
+        config = apply_preset(config, "genealogy")
+        console.print("[green]✓[/green] Genealogy preset applied [dim](specialized agents for all roles)[/dim]\n")
 
     # Get the query/brief
     if not question:
         if deep_brief:
-            console.print("[dim]Paste your brief below. Enter a blank line followed by END to finish:[/dim]")
+            if genealogy:
+                console.print("[bold]Paste your known family tree data below.[/bold]")
+                console.print("[dim]Include all known ancestors, dates, and historical context.")
+                console.print("You can also load from a file with --from-file.[/dim]")
+            else:
+                console.print("[bold]Paste your research brief below.[/bold]")
+            console.print("[dim]Enter a blank line followed by END when done:[/dim]\n")
             lines = []
             while True:
                 line = input()
@@ -171,7 +184,9 @@ def query(question, config_path, preset, pick, debug, models, from_file, mode):
         console.print("[red]No query provided.[/red]")
         return
 
-    if deep_brief:
+    if genealogy:
+        console.print("\n[green]Genealogy mode[/green] [dim]— specialized agents, GEDCOM output, up to 6 research threads[/dim]\n")
+    elif deep_brief:
         console.print("\n[magenta]Deep brief mode[/magenta] [dim]— brief injected into all agents, up to 6 subtasks[/dim]\n")
 
     asyncio.run(run_swarm(question, config, debug=debug, deep_brief=deep_brief))
