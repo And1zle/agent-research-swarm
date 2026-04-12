@@ -162,6 +162,16 @@ def query(question, config_path, preset, pick, debug, models, from_file, mode, n
         config = apply_preset(config, "genealogy")
         console.print("[green]✓[/green] Genealogy preset applied [dim](specialized agents for all roles)[/dim]\n")
 
+    # Parallel agents prompt (only when not passed as flag)
+    if n_parallel == 1:
+        console.print("[bold]Run multiple researcher agents in parallel?[/bold]")
+        console.print("  [dim]1[/dim]  Sequential [dim](default — one subtask at a time)[/dim]")
+        console.print("  [dim]2[/dim]  2 parallel  [dim](2x faster research step)[/dim]")
+        console.print("  [dim]3[/dim]  3 parallel  [dim](fastest)[/dim]\n")
+        raw = console.input("  Parallel researchers [dim](1/2/3, default 1):[/dim] ").strip()
+        n_parallel = int(raw) if raw.isdigit() and int(raw) in (1, 2, 3) else 1
+        console.print()
+
     # Get the query/brief
     if not question:
         if deep_brief:
